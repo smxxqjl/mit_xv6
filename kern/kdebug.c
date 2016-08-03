@@ -4,7 +4,6 @@
 #include <inc/assert.h>
 
 #include <kern/kdebug.h>
-
 extern const struct Stab __STAB_BEGIN__[];	// Beginning of stabs table
 extern const struct Stab __STAB_END__[];	// End of stabs table
 extern const char __STABSTR_BEGIN__[];		// Beginning of string table
@@ -179,8 +178,10 @@ debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
 	//	Look at the STABS documentation and <inc/stab.h> to find
 	//	which one.
 	// Your code here.
-
-
+	lline = lfun;
+	rline = rfun;
+	stab_binsearch(stabs, &lline, &rline, N_SLINE, addr);
+	info->eip_line = stabs[lline].n_value;
 	// Search backwards from the line number for the relevant filename
 	// stab.
 	// We can't just use the "lfile" stab because inlined functions

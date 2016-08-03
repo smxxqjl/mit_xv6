@@ -82,6 +82,7 @@ void printfmt(void (*putch)(int, void*), void *putdat, const char *fmt, ...);
 void
 vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 {
+	// Is the register prefix still necessary?
 	register const char *p;
 	register int ch, err;
 	unsigned long long num;
@@ -89,6 +90,8 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 	char padc;
 
 	while (1) {
+		// parsing the fmt string
+		// print the character if it's not a formatter 
 		while ((ch = *(unsigned char *) fmt++) != '%') {
 			if (ch == '\0')
 				return;
@@ -102,6 +105,7 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		lflag = 0;
 		altflag = 0;
 	reswitch:
+		// Parsing the formater
 		switch (ch = *(unsigned char *) fmt++) {
 
 		// flag to pad on the right
@@ -206,11 +210,10 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		// (unsigned) octal
 		case 'o':
 			// Replace this with your code.
-			putch('X', putdat);
-			putch('X', putdat);
-			putch('X', putdat);
-			break;
-
+			//putch('0', putdat);
+			num = getuint(&ap, lflag);
+			base = 8;
+			goto number;
 		// pointer
 		case 'p':
 			putch('0', putdat);

@@ -59,6 +59,30 @@ int
 mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 {
 	// Your code here.
+	// I am kinda confused about the tree argument given by caller,
+	// But after reading function mon_kerninfo I guess it's useless in
+	// this implementation.
+	uint32_t ebp, iterebp, itereip, argdata, iteresp;
+	int argcnum, i, currentfun;
+	struct Eipdebuginfo eipinfo;
+
+	currentfun = 1;
+	argcnum = 5;// We always read five argument
+	ebp = read_ebp();
+	iterebp = ebp;
+	cprintf("Stack backtrace:\n");
+	do {
+		iteresp = iterebp + 8;
+		memcpy(&itereip, (void*)((uint32_t*)(long)iterebp+1), sizeof(uint32_t));
+		cprintf("  ebp %08x  eip %08x  args", iterebp, itereip);
+		for(i = 0; i < argcnum; i++) {
+			memcpy(&argdata, (void*)((uint32_t*)(long)iteresp+i), sizeof(uint32_t));
+			cprintf(" %08x", argdata);
+		}
+		cprintf("\n");
+		debuginfo_eip(itereip, &eipinfo);
+		cprintf("    %s:%d: %.*s+0\n", eipinfo.eip_file, eipinfo.eip_line, eipinfo.eip_fn_namelen, eipinfo.eip_fn_name);
+	} while(memcpy(&iterebp, (void*)(long)iterebp, sizeof(uint32_t)) && iterebp != 0);
 	return 0;
 }
 
