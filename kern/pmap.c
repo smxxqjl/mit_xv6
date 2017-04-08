@@ -81,6 +81,7 @@ static void *
 boot_alloc(uint32_t n)
 {
 	static char *nextfree;	// virtual address of next byte of free memory
+	char *ptr;
 	char *result;
 
 	// Initialize nextfree if this is the first time.
@@ -91,6 +92,7 @@ boot_alloc(uint32_t n)
 	if (!nextfree) {
 		extern char end[];
 		nextfree = ROUNDUP((char *) end, PGSIZE);
+		// cprintf("This is the kernel top address: %x\n", end);
 	}
 
 	// Allocate a chunk large enough to hold 'n' bytes, then update
@@ -98,8 +100,34 @@ boot_alloc(uint32_t n)
 	// to a multiple of PGSIZE.
 	//
 	// LAB 2: Your code here.
+	
+	/*
+	 * The code is easy, nextfree pointer is aliased in last call or last
+	 * if branch (if the first call), all we need to do is to add the     
+	 * requested bytes to nextfree pointer and round it up.
+	 *
+	 * But I wonder is the allocated space always aligned to PGSIZE? Isn't it 
+	 * seems too much waste? 
+	 *
+	 * I am not quiet sure. But from my point of view, there are two cases that
+	 * "run out of memory" would happen, either run out of physical memory or 
+	 * virtual address overflow ,that is, the address after adding operation is
+	 * beyond 0xfffffff (note: we only open 4MB in VM for now) 
+	 */
 
-	return NULL;
+	if (n == 0)
+	    return nextfree;
+	else {
+	    ptr = nextfree;
+	    nextfree = (char *)((long)nextfree+n);
+	    nextfree = ROUNDUP(nextfree, PGSIZE);
+	    if ((long)nextfree > 0xffffffff)
+		panic("Virtual Memory address overflow\n");
+	    else if (((long)nextfree-0xf0100000)/1024 > (npages - npages_basemem))
+		panic("Run out of physical memory\n");
+	    else 
+		return ptr;
+	}
 }
 
 // Set up a two-level page table:
@@ -119,9 +147,10 @@ mem_init(void)
 
 	// Find out how much memory the machine has (npages & npages_basemem).
 	i386_detect_memory();
+	// npages 16639 npages_basemem 160
 
 	// Remove this line when you're ready to test this function.
-	panic("mem_init: This function is not finished\n");
+	// panic("mem_init: This function is not finished\n");
 
 	//////////////////////////////////////////////////////////////////////
 	// create initial page directory.
@@ -136,6 +165,7 @@ mem_init(void)
 
 	// Permissions: kernel R, user R
 	kern_pgdir[PDX(UVPT)] = PADDR(kern_pgdir) | PTE_U | PTE_P;
+	cprintf("%p\n", PADDR(kern_pgdir));
 
 	//////////////////////////////////////////////////////////////////////
 	// Allocate an array of npages 'struct PageInfo's and store it in 'pages'.
@@ -144,8 +174,9 @@ mem_init(void)
 	// array.  'npages' is the number of physical pages in memory.  Use memset
 	// to initialize all fields of each struct PageInfo to 0.
 	// Your code goes here:
-
-
+	
+	pages = boot_alloc(npages*sizeof(struct PageInfo));
+	memset(pages, 0, npages*sizeof(struct PageInfo));
 	//////////////////////////////////////////////////////////////////////
 	// Now that we've allocated the initial kernel data structures, we set
 	// up the list of free physical pages. Once we've done so, all further
@@ -153,6 +184,13 @@ mem_init(void)
 	// particular, we can now map memory using boot_map_region
 	// or page_insert
 	page_init();
+	/* debug code 
+	cprintf("The address of free list is %p\n", page_free_list);
+	cprintf("The address of start pages is %p\n", pages);
+	cprintf("The length of structt page info is%d\n", sizeof(struct PageInfo));
+	cprintf("The page2kva of page is %x\n", page2kva(&pages[255]));
+	cprintf("The page2va of page is %x\n", page2pa(&pages[255]));
+	*/
 
 	check_page_free_list(1);
 	check_page_alloc();
@@ -247,8 +285,28 @@ page_init(void)
 	// Change the code to reflect this.
 	// NB: DO NOT actually touch the physical memory corresponding to
 	// free pages!
-	size_t i;
-	for (i = 0; i < npages; i++) {
+	size_t i, pages_kerntop, pages_top, pages_extmem;
+	pages[0].pp_ref = 0;
+	pages[0].pp_link = NULL;
+	pages[1].pp_ref = 0;
+	pages[1].pp_link = NULL;
+	page_free_list = &pages[1];
+	for (i = 2; i < npages_basemem; i++) {
+		pages[i].pp_ref = 0;
+		pages[i].pp_link = page_free_list;
+		page_free_list = &pages[i];
+	}
+	pages_extmem = EXTPHYSMEM/PGSIZE;
+	for (i = npages_basemem; i < pages_extmem; i++) {
+		pages[i].pp_ref = 0;
+		pages[i].pp_link = NULL;
+	}
+	pages_kerntop = ((unsigned long)boot_alloc(0) - KERNBASE)/PGSIZE;
+	for (i = pages_extmem; i < pages_kerntop; i++) {
+		pages[i].pp_ref = 0;
+		pages[i].pp_link = NULL;
+	}
+	for (i = pages_kerntop; i < npages; i++) {
 		pages[i].pp_ref = 0;
 		pages[i].pp_link = page_free_list;
 		page_free_list = &pages[i];
@@ -270,8 +328,20 @@ page_init(void)
 struct PageInfo *
 page_alloc(int alloc_flags)
 {
-	// Fill this function in
-	return 0;
+	struct PageInfo* ptr;
+
+	if (page_free_list == NULL)
+		return NULL;
+	if (alloc_flags & ALLOC_ZERO) {
+		int temp = (long)page_free_list - (long)pages;
+		cprintf("%p %p\n", page_free_list, pages);
+		cprintf("The between space is %x\n", temp);
+		memset(page2kva(page_free_list), '\0', PGSIZE);
+	}
+	ptr = page_free_list;
+	page_free_list = page_free_list->pp_link;
+	ptr->pp_link = NULL;
+	return ptr;
 }
 
 //
@@ -284,6 +354,10 @@ page_free(struct PageInfo *pp)
 	// Fill this function in
 	// Hint: You may want to panic if pp->pp_ref is nonzero or
 	// pp->pp_link is not NULL.
+	if (pp->pp_link != NULL || pp->pp_ref !=0)
+		panic("Error state for freeing page");
+	pp->pp_link = page_free_list;
+	page_free_list = pp;
 }
 
 //
@@ -322,7 +396,24 @@ page_decref(struct PageInfo* pp)
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
-	// Fill this function in
+	pte_t *direntry, tabentry;
+	struct PageInfo *alloc_page;
+	uintptr_t *kva;
+	physaddr_t pa;
+
+	pgdir[PDX(va)] = 5;
+	direntry = &(pgdir[PDX(va)]); 
+	if (!(*direntry & PTE_AVAIL)) {
+		if (!create)
+			return NULL;
+		else {
+			alloc_page = page_alloc(1);
+			kva = page2kva(alloc_page);
+			pa = page2pa(alloc_page);
+			*direntry = pa | PTE_AVAIL | PTE_U | PTE_P;
+		}
+	}
+
 	return NULL;
 }
 
@@ -463,8 +554,10 @@ check_page_free_list(bool only_low_memory)
 	// if there's a page that shouldn't be on the free list,
 	// try to make sure it eventually causes trouble.
 	for (pp = page_free_list; pp; pp = pp->pp_link)
-		if (PDX(page2pa(pp)) < pdx_limit)
+		if (PDX(page2pa(pp)) < pdx_limit) {
+			//cprintf("The page to be set if %x", page2kva(pp));
 			memset(page2kva(pp), 0x97, 128);
+		}
 
 	first_free_page = (char *) boot_alloc(0);
 	for (pp = page_free_list; pp; pp = pp->pp_link) {
